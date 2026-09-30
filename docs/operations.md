@@ -17,6 +17,10 @@
 
 - Reducing `min_nodes` or `node_count`.
 - Changing `node_type`, which can replace the node pool.
+- Changing `cluster_type`, which replaces the cluster unless Scaleway offers the
+  new type as an in-place upgrade.
+- Changing `cluster_type`, which replaces the cluster unless Scaleway offers the
+  new type as an in-place upgrade.
 - Changing network or pod CIDRs.
 - Removing an API-server allowlist entry.
 - Changing bucket-policy principals or prefixes.

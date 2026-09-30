@@ -9,12 +9,22 @@ module "databaas_workload" {
   name        = "example-databaas-dev"
   environment = "dev"
 
-  node_type  = "DEV1-M"
-  node_count = 2
-  min_nodes  = 2
-  max_nodes  = 4
-
-  root_volume_size_in_gb = 40
+  node_pools = {
+    ams1 = {
+      node_type  = "DEV1-M"
+      zone       = "nl-ams-1"
+      node_count = 1
+      min_nodes  = 1
+      max_nodes  = 2
+    }
+    ams2 = {
+      node_type  = "DEV1-M"
+      zone       = "nl-ams-2"
+      node_count = 1
+      min_nodes  = 1
+      max_nodes  = 2
+    }
+  }
 
   api_server_allowed_ips = [
     {

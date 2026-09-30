@@ -35,16 +35,24 @@ variable "region" {
   default     = "nl-ams"
 }
 
-variable "zone" {
-  description = "Scaleway zone for the node pool."
+# A change is applied in place only when Scaleway lists the new type as
+# available for the cluster (typically an upgrade). Any other change - a
+# downgrade, say - makes the provider REPLACE the cluster.
+variable "cluster_type" {
+  description = "Kapsule control-plane offer: \"kapsule\" (mutualized) or a dedicated one, \"kapsule-dedicated-4\", \"kapsule-dedicated-8\" or \"kapsule-dedicated-16\"."
   type        = string
-  default     = "nl-ams-1"
+  default     = "kapsule"
+
+  validation {
+    condition     = contains(["kapsule", "kapsule-dedicated-4", "kapsule-dedicated-8", "kapsule-dedicated-16"], var.cluster_type)
+    error_message = "cluster_type must be kapsule, kapsule-dedicated-4, kapsule-dedicated-8 or kapsule-dedicated-16."
+  }
 }
 
 variable "kubernetes_version" {
   description = "Kapsule Kubernetes version."
   type        = string
-  default     = "1.34"
+  default     = "1.37"
 }
 
 variable "auto_upgrade_enabled" {
@@ -103,55 +111,66 @@ variable "pod_cidr" {
   }
 }
 
-variable "node_type" {
-  description = "Node pool instance type."
-  type        = string
-}
+variable "node_pools" {
+  description = "Node pools keyed by short name (pool name = \"<name>-<key>\"). One pool per zone spreads the cluster across the region; a pool with its own node type, taints and labels gives a workload dedicated hardware. Node types are not offered in every zone - check availability before choosing one."
+  type = map(object({
+    node_type  = string
+    zone       = string
+    node_count = number
+    min_nodes  = number
+    max_nodes  = number
 
-variable "node_count" {
-  description = "Initial node count. Must sit between min_nodes and max_nodes."
-  type        = number
+    # Kapsule's minimum is 20GB, which the image cache can fill and trigger
+    # DiskPressure evictions, so the default sits above it. 40 rather than more
+    # because it is the largest value valid on every node type: local-storage
+    # types (DEV1-*) root onto the instance's local SSD, whose size the type
+    # fixes, and the API rejects anything larger. Raise it on block-backed types
+    # (GP1-*, PRO2-*, POP2-*).
+    root_volume_size_in_gb = optional(number, 40)
+
+    taints = optional(list(object({
+      key    = string
+      value  = optional(string, "")
+      effect = string
+    })), [])
+
+    labels = optional(map(string), {})
+  }))
 
   validation {
-    condition     = var.node_count >= 1 && floor(var.node_count) == var.node_count
-    error_message = "node_count must be a positive whole number."
+    condition     = length(var.node_pools) > 0
+    error_message = "node_pools must contain at least one pool."
   }
-}
-
-variable "min_nodes" {
-  description = "Autoscaler lower bound."
-  type        = number
 
   validation {
-    condition     = var.min_nodes >= 1 && floor(var.min_nodes) == var.min_nodes
-    error_message = "min_nodes must be a positive whole number."
+    condition     = alltrue([for key in keys(var.node_pools) : can(regex("^[a-z0-9]+(-[a-z0-9]+)*$", key))])
+    error_message = "Each node pool key must be lowercase alphanumeric, optionally dash-separated, e.g. \"ams1\" or \"trino\"."
   }
-}
-
-variable "max_nodes" {
-  description = "Autoscaler upper bound."
-  type        = number
 
   validation {
-    condition     = var.max_nodes >= 1 && floor(var.max_nodes) == var.max_nodes
-    error_message = "max_nodes must be a positive whole number."
+    condition = alltrue([
+      for pool in var.node_pools :
+      pool.min_nodes >= 1 && pool.node_count >= pool.min_nodes && pool.node_count <= pool.max_nodes &&
+      floor(pool.min_nodes) == pool.min_nodes && floor(pool.node_count) == pool.node_count && floor(pool.max_nodes) == pool.max_nodes
+    ])
+    error_message = "Each node pool needs whole-number sizes with 1 <= min_nodes <= node_count <= max_nodes."
   }
-}
-
-# Kapsule's minimum is 20GB, which the image cache can fill and trigger
-# DiskPressure evictions, so the default sits above it.
-#
-# 40 rather than more because it is the largest value valid on every node type
-# we use: local-storage types (DEV1-*) root onto the instance's local SSD, whose
-# size the type fixes - 40GB on DEV1-M - and the API rejects anything larger.
-variable "root_volume_size_in_gb" {
-  description = "System volume size per node, above Kapsule's 20GB minimum for image cache headroom. Defaults to the largest value every supported node type accepts; raise it on block-backed types (PRO2-*, POP2-*)."
-  type        = number
-  default     = 40
 
   validation {
-    condition     = var.root_volume_size_in_gb >= 20 && floor(var.root_volume_size_in_gb) == var.root_volume_size_in_gb
-    error_message = "root_volume_size_in_gb must be a whole number of at least 20."
+    condition = alltrue([
+      for pool in var.node_pools :
+      pool.root_volume_size_in_gb >= 20 && floor(pool.root_volume_size_in_gb) == pool.root_volume_size_in_gb
+    ])
+    error_message = "Each node pool's root_volume_size_in_gb must be a whole number of at least 20."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for pool in var.node_pools : [
+        for taint in pool.taints : contains(["NoSchedule", "PreferNoSchedule", "NoExecute"], taint.effect)
+      ]
+    ]))
+    error_message = "Each taint's effect must be NoSchedule, PreferNoSchedule or NoExecute."
   }
 }
 

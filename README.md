@@ -7,7 +7,7 @@ The module creates:
 
 - one VPC and private network;
 - one Kapsule Kubernetes cluster with Cilium;
-- one autoscaled and auto-healed node pool;
+- one or more autoscaled and auto-healed node pools, each in its own zone;
 - an explicit Kubernetes API-server allowlist;
 - dedicated `lakehouse`, `metadata`, `logs`, and `backups` buckets;
 - deny-by-default bucket policies scoped to caller-supplied IAM principals.
@@ -55,14 +55,25 @@ module "databaas_workload" {
   project_id  = var.scaleway_project_id
 
   region = "nl-ams"
-  zone   = "nl-ams-1"
 
-  node_type  = "REPLACE_WITH_REVIEWED_NODE_TYPE"
-  node_count = 3
-  min_nodes  = 3
-  max_nodes  = 10
-
-  root_volume_size_in_gb = 100
+  node_pools = {
+    ams1 = {
+      node_type              = "REPLACE_WITH_REVIEWED_NODE_TYPE"
+      zone                   = "nl-ams-1"
+      node_count             = 2
+      min_nodes              = 2
+      max_nodes              = 5
+      root_volume_size_in_gb = 100
+    }
+    ams2 = {
+      node_type              = "REPLACE_WITH_REVIEWED_NODE_TYPE"
+      zone                   = "nl-ams-2"
+      node_count             = 2
+      min_nodes              = 2
+      max_nodes              = 5
+      root_volume_size_in_gb = 100
+    }
+  }
 
   api_server_allowed_ips = [
     {
@@ -151,13 +162,9 @@ substitute for tested backups and restores.
 | `environment` | yes | — | Environment label such as `dev` or `prod` |
 | `project_id` | no | provider default | Customer Scaleway project ID |
 | `region` | no | `nl-ams` | Scaleway region |
-| `zone` | no | `nl-ams-1` | Node-pool zone; must belong to `region` |
-| `kubernetes_version` | no | `1.34` | Kapsule Kubernetes version |
-| `node_type` | yes | — | Scaleway node-pool instance type |
-| `node_count` | yes | — | Initial node count |
-| `min_nodes` | yes | — | Autoscaler minimum |
-| `max_nodes` | yes | — | Autoscaler maximum |
-| `root_volume_size_in_gb` | no | `40` | Node root-volume size |
+| `cluster_type` | no | `kapsule` | Control-plane offer: `kapsule` (mutualized) or `kapsule-dedicated-{4,8,16}` |
+| `kubernetes_version` | no | `1.37` | Kapsule Kubernetes version |
+| `node_pools` | yes | — | Pools keyed by short name: `node_type`, `zone` (must belong to `region`), `node_count`, `min_nodes`, `max_nodes`, optional `root_volume_size_in_gb` (default `40`), `taints`, `labels` |
 | `private_network_subnet` | no | assigned by Scaleway | Optional private-network CIDR |
 | `pod_cidr` | no | `10.244.0.0/16` | Kubernetes pod CIDR |
 | `api_server_allowed_ips` | yes | — | Approved CIDRs for the public API endpoint |
