@@ -1,7 +1,7 @@
 # Databaas workload environment on Scaleway.
 #
 # This module provisions Scaleway infrastructure only: a VPC, private network,
-# Kapsule cluster, node pool, API-server ACL, object-storage buckets, and the
+# Kapsule cluster, node pools, API-server ACL, object-storage buckets, and the
 # bucket policies that restrict those buckets. Kubernetes software and IAM
 # identities are deliberately outside this module.
 
@@ -119,6 +119,7 @@ resource "scaleway_vpc_private_network" "this" {
 
 resource "scaleway_k8s_cluster" "this" {
   name       = var.name
+  type       = var.cluster_type
   version    = var.kubernetes_version
   cni        = "cilium"
   region     = var.region
@@ -149,25 +150,42 @@ resource "scaleway_k8s_cluster" "this" {
   }
 }
 
+# One pool per zone is how a cluster spreads across a region: the control plane
+# is regional, a pool is not. balance_similar_node_groups above keeps pools of
+# the same node type scaled evenly.
 resource "scaleway_k8s_pool" "this" {
+  for_each = var.node_pools
+
   cluster_id = scaleway_k8s_cluster.this.id
-  name       = "${var.name}-pool"
-  node_type  = var.node_type
-  size       = var.node_count
+  name       = "${var.name}-${each.key}"
+  node_type  = each.value.node_type
+  size       = each.value.node_count
   region     = var.region
-  zone       = var.zone
+  zone       = each.value.zone
 
   autoscaling = true
-  min_size    = var.min_nodes
-  max_size    = var.max_nodes
+  min_size    = each.value.min_nodes
+  max_size    = each.value.max_nodes
 
-  root_volume_size_in_gb = var.root_volume_size_in_gb
+  root_volume_size_in_gb = each.value.root_volume_size_in_gb
 
   autohealing         = true
   container_runtime   = "containerd"
   wait_for_pool_ready = true
 
-  tags = local.tags
+  labels = each.value.labels
+  tags   = concat(local.tags, ["node-pool=${each.key}"])
+
+  # `value` is required by the provider; the variable defaults it to "" so a
+  # valueless Kubernetes taint stays expressible.
+  dynamic "taints" {
+    for_each = each.value.taints
+    content {
+      key    = taints.value.key
+      value  = taints.value.value
+      effect = taints.value.effect
+    }
+  }
 
   upgrade_policy {
     max_unavailable = 1
@@ -274,16 +292,9 @@ resource "scaleway_object_bucket_policy" "this" {
   })
 }
 
-check "node_pool_bounds" {
+check "zones_match_region" {
   assert {
-    condition     = var.min_nodes <= var.node_count && var.node_count <= var.max_nodes
-    error_message = "node_count must be between min_nodes and max_nodes."
-  }
-}
-
-check "zone_matches_region" {
-  assert {
-    condition     = startswith(var.zone, "${var.region}-")
-    error_message = "zone must belong to region (for example, nl-ams-1 belongs to nl-ams)."
+    condition     = alltrue([for pool in var.node_pools : startswith(pool.zone, "${var.region}-")])
+    error_message = "Every node pool's zone must belong to region (for example, nl-ams-1 belongs to nl-ams)."
   }
 }
