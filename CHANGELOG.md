@@ -6,6 +6,12 @@ All notable changes to this module are documented here.
 
 - No changes yet.
 
+## 0.1.1
+
+- Add a CORS rule to the lakehouse bucket allowing `GET` and `HEAD` from any
+  origin, so browsers can read lakehouse data directly. Access still requires
+  a signed request permitted by the bucket policy.
+
 ## 0.1.0
 
 - Extract the Scaleway workload environment into a standalone module.

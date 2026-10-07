@@ -244,6 +244,19 @@ resource "scaleway_object_bucket" "this" {
   versioning {
     enabled = lookup(var.bucket_versioning, each.key, false)
   }
+
+  # Lets browsers read lakehouse objects directly (signed requests only; the
+  # bucket policy still gates who can sign).
+  dynamic "cors_rule" {
+    for_each = each.key == "lakehouse" ? [1] : []
+    content {
+      allowed_origins = ["*"]
+      allowed_methods = ["GET", "HEAD"]
+      allowed_headers = ["*"]
+      expose_headers  = ["ETag", "Content-Range"]
+      max_age_seconds = 3600
+    }
+  }
 }
 
 # Scaleway IAM Object Storage permissions are project-wide, because
